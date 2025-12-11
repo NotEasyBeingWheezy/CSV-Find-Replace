@@ -8,14 +8,14 @@
     "target_column_index": 17
   },
   "file_paths": {
-    "input_file": "./example_input.csv",
-    "output_file": "./test.csv",
+    "input_file": "./input.csv",
+    "output_file": "./output.csv",
     "note": "Leave empty to be prompted, or specify absolute paths"
   },
   "processing_rules": {
-    "target_field_name": "HP SKU",
-    "search_value": "",
-    "replace_value": "",
+    "target_field_name": "X Axis Position",
+    "search_value": "23.7",
+    "replace_value": "23.47",
     "note": "Searches for 'search_value' in the target field and replaces with 'replace_value'"
   },
   "logging": {
