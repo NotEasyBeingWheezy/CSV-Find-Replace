@@ -3,12 +3,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Log files
-*.log
-
-# Backup files
-*_backup_*.csv
-
 # Processed output files
 *_processed.csv
 
