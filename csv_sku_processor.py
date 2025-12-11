@@ -21,7 +21,7 @@ import shutil
 
 
 class CSVSKUProcessor:
-    """Processes CSV files to modify HP SKU values in JSON data."""
+    """Processes CSV files to find and replace values in JSON field data."""
 
     def __init__(self, config_path: str = "config.json"):
         """
@@ -37,9 +37,10 @@ class CSVSKUProcessor:
             'rows_modified': 0,
             'errors': 0,
             'malformed_json': [],
-            'missing_hp_sku': [],
-            'skus_unchanged': 0,
-            'skus_modified': []
+            'empty_columns': [],
+            'missing_target_field': [],
+            'fields_unchanged': 0,
+            'fields_modified': []
         }
         self._setup_logging()
 
@@ -109,16 +110,20 @@ class CSVSKUProcessor:
         Returns:
             Tuple of (processed_value, was_modified)
         """
-        if not field_value or not isinstance(field_value, str):
+        if not isinstance(field_value, str):
             return field_value, False
 
         search_value = self.config['processing_rules']['search_value']
         replace_value = self.config['processing_rules']['replace_value']
 
+        # If no search value specified, no modifications can be made
+        if search_value is None or search_value == '':
+            return field_value, False
+
         # Check if search value exists in the field value
-        if search_value and search_value in field_value:
+        if search_value in field_value:
             new_value = field_value.replace(search_value, replace_value)
-            return new_value, True
+            return new_value, new_value != field_value  # Only mark as modified if value actually changed
 
         return field_value, False
 
@@ -134,16 +139,19 @@ class CSVSKUProcessor:
             Tuple of (modified_json_string, was_modified)
         """
         if not json_str or json_str.strip() == '':
-            self.stats['missing_hp_sku'].append({'row': row_num, 'reason': 'Empty column R'})
-            self.logger.debug(f"Row {row_num}: Column R is empty - no JSON data")
+            self.stats['empty_columns'].append(row_num)
+            self.logger.debug(f"Row {row_num}: Target column is empty - no JSON data")
             return json_str, False
 
         try:
             # Parse JSON
             data = json.loads(json_str)
 
+            # Track if original was a single object (not an array)
+            was_single_object = not isinstance(data, list)
+
             # Handle both array and single object
-            if not isinstance(data, list):
+            if was_single_object:
                 data = [data]
 
             modified = False
@@ -161,22 +169,25 @@ class CSVSKUProcessor:
                     if was_modified:
                         item['value'] = new_value
                         modified = True
-                        self.stats['skus_modified'].append({
+                        self.stats['fields_modified'].append({
                             'row': row_num,
                             'original': original_value,
                             'new': new_value
                         })
                         self.logger.debug(f"Row {row_num}: Modified field '{original_value}' -> '{new_value}'")
                     else:
-                        self.stats['skus_unchanged'] += 1
+                        self.stats['fields_unchanged'] += 1
                     break
 
             if not field_found:
-                self.stats['missing_hp_sku'].append({'row': row_num, 'reason': 'Target field not found in JSON'})
-                self.logger.debug(f"Row {row_num}: Target field '{target_field_name}' not found")
+                self.stats['missing_target_field'].append(row_num)
+                self.logger.debug(f"Row {row_num}: Target field '{target_field_name}' not found in JSON")
 
-            # Return modified JSON
-            return json.dumps(data, ensure_ascii=False), modified
+            # Restore original structure before returning
+            if was_single_object and len(data) == 1:
+                return json.dumps(data[0], ensure_ascii=False), modified
+            else:
+                return json.dumps(data, ensure_ascii=False), modified
 
         except json.JSONDecodeError as e:
             self.stats['malformed_json'].append({'row': row_num, 'error': str(e)})
@@ -190,7 +201,7 @@ class CSVSKUProcessor:
 
     def process_csv(self, input_file: str, output_file: str):
         """
-        Process the CSV file and modify HP SKU values.
+        Process the CSV file and modify target field values based on search/replace rules.
 
         Args:
             input_file: Path to the input CSV file
@@ -265,21 +276,21 @@ class CSVSKUProcessor:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
         # Log 1: Successful Changes
-        if self.stats['skus_modified']:
+        if self.stats['fields_modified']:
             success_log = f"successful_changes_{timestamp}.log"
             with open(success_log, 'w', encoding='utf-8') as f:
                 f.write("="*60 + "\n")
                 f.write("SUCCESSFUL FIELD MODIFICATIONS\n")
                 f.write("="*60 + "\n")
                 f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"Total modifications: {len(self.stats['skus_modified'])}\n")
+                f.write(f"Total modifications: {len(self.stats['fields_modified'])}\n")
                 f.write("="*60 + "\n\n")
 
-                for mod in self.stats['skus_modified']:
+                for mod in self.stats['fields_modified']:
                     f.write(f"Row {mod['row']}: '{mod['original']}' -> '{mod['new']}'\n")
 
                 f.write("\n" + "="*60 + "\n")
-                f.write(f"End of log - Total entries: {len(self.stats['skus_modified'])}\n")
+                f.write(f"End of log - Total entries: {len(self.stats['fields_modified'])}\n")
                 f.write("="*60 + "\n")
 
             self.logger.info(f"Successful changes log written to: {success_log}")
@@ -305,24 +316,44 @@ class CSVSKUProcessor:
             self.logger.info(f"Errors/malformed JSON log written to: {error_log}")
 
         # Log 3: Missing Target Field
-        if self.stats['missing_hp_sku']:
+        if self.stats['missing_target_field']:
             missing_log = f"missing_target_field_{timestamp}.log"
             with open(missing_log, 'w', encoding='utf-8') as f:
                 f.write("="*60 + "\n")
                 f.write("ROWS MISSING TARGET FIELD\n")
                 f.write("="*60 + "\n")
                 f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"Total rows missing target field: {len(self.stats['missing_hp_sku'])}\n")
+                f.write(f"Total rows missing target field: {len(self.stats['missing_target_field'])}\n")
                 f.write("="*60 + "\n\n")
 
-                for entry in self.stats['missing_hp_sku']:
-                    f.write(f"Row {entry['row']}: {entry['reason']}\n")
+                for row_num in self.stats['missing_target_field']:
+                    f.write(f"Row {row_num}: Target field not found in JSON\n")
 
                 f.write("\n" + "="*60 + "\n")
-                f.write(f"End of log - Total entries: {len(self.stats['missing_hp_sku'])}\n")
+                f.write(f"End of log - Total entries: {len(self.stats['missing_target_field'])}\n")
                 f.write("="*60 + "\n")
 
             self.logger.info(f"Missing target field log written to: {missing_log}")
+
+        # Log 4: Empty Columns
+        if self.stats['empty_columns']:
+            empty_log = f"empty_columns_{timestamp}.log"
+            with open(empty_log, 'w', encoding='utf-8') as f:
+                f.write("="*60 + "\n")
+                f.write("ROWS WITH EMPTY TARGET COLUMN\n")
+                f.write("="*60 + "\n")
+                f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Total rows with empty column: {len(self.stats['empty_columns'])}\n")
+                f.write("="*60 + "\n\n")
+
+                for row_num in self.stats['empty_columns']:
+                    f.write(f"Row {row_num}: Target column is empty\n")
+
+                f.write("\n" + "="*60 + "\n")
+                f.write(f"End of log - Total entries: {len(self.stats['empty_columns'])}\n")
+                f.write("="*60 + "\n")
+
+            self.logger.info(f"Empty columns log written to: {empty_log}")
 
     def print_summary(self):
         """Print a summary of the processing results."""
@@ -334,10 +365,11 @@ class CSVSKUProcessor:
         print(f"Rows modified:             {self.stats['rows_modified']}")
         print(f"Rows in output file:       {self.stats['rows_modified'] + 1}")  # +1 for header
         print(f"Rows excluded:             {self.stats['total_rows'] - self.stats['rows_modified'] - 1}")  # -1 for header
-        print(f"Fields unchanged:          {self.stats['skus_unchanged']}")
+        print(f"Fields unchanged:          {self.stats['fields_unchanged']}")
         print(f"Errors encountered:        {self.stats['errors']}")
         print(f"Malformed JSON rows:       {len(self.stats['malformed_json'])}")
-        print(f"Rows missing target field: {len(self.stats['missing_hp_sku'])}")
+        print(f"Empty target columns:      {len(self.stats['empty_columns'])}")
+        print(f"Rows missing target field: {len(self.stats['missing_target_field'])}")
         print("="*60)
 
         if self.stats['malformed_json']:
@@ -347,19 +379,25 @@ class CSVSKUProcessor:
             if len(self.stats['malformed_json']) > 10:
                 print(f"  ... and {len(self.stats['malformed_json']) - 10} more")
 
-        if self.stats['missing_hp_sku']:
-            print(f"\nRows missing target field: {len(self.stats['missing_hp_sku'])}")
-            if len(self.stats['missing_hp_sku']) <= 20:
-                for entry in self.stats['missing_hp_sku']:
-                    print(f"  Row {entry['row']}: {entry['reason']}")
+        if self.stats['empty_columns']:
+            print(f"\nRows with empty target column: {len(self.stats['empty_columns'])}")
+            if len(self.stats['empty_columns']) <= 20:
+                for row_num in self.stats['empty_columns']:
+                    print(f"  Row {row_num}")
             else:
-                print("  First 20 rows:")
-                for entry in self.stats['missing_hp_sku'][:20]:
-                    print(f"  Row {entry['row']}: {entry['reason']}")
+                print(f"  First 20 rows: {', '.join(map(str, self.stats['empty_columns'][:20]))}")
 
-        if self.stats['skus_modified']:
+        if self.stats['missing_target_field']:
+            print(f"\nRows missing target field: {len(self.stats['missing_target_field'])}")
+            if len(self.stats['missing_target_field']) <= 20:
+                for row_num in self.stats['missing_target_field']:
+                    print(f"  Row {row_num}")
+            else:
+                print(f"  First 20 rows: {', '.join(map(str, self.stats['missing_target_field'][:20]))}")
+
+        if self.stats['fields_modified']:
             print(f"\nSample of modified fields (first 10):")
-            for mod in self.stats['skus_modified'][:10]:
+            for mod in self.stats['fields_modified'][:10]:
                 print(f"  Row {mod['row']}: '{mod['original']}' -> '{mod['new']}'")
 
         print("\n" + "="*60)
@@ -411,9 +449,18 @@ def main():
     # Get file paths
     input_file, output_file = get_file_paths(processor.config)
 
+    # Validate configuration
+    search_value = processor.config['processing_rules'].get('search_value', '')
+    if not search_value or search_value == '':
+        print("\nWARNING: 'search_value' is empty in config.json")
+        print("No replacements will be performed. Update config.json to specify what to search for.")
+        print("Example: \"search_value\": \"S\" to find the letter 'S'")
+
     # Confirm before processing
     print(f"\nInput file:  {input_file}")
     print(f"Output file: {output_file}")
+    print(f"Search for:  '{search_value}'")
+    print(f"Replace with: '{processor.config['processing_rules'].get('replace_value', '')}'")
     response = input("\nProceed with processing? (y/n): ").strip().lower()
 
     if response != 'y':
