@@ -1,0 +1,14 @@
+# CSV HP SKU Processor - Python Requirements
+# This script uses only Python standard library modules
+# Python 3.6+ required
+
+# No external dependencies required
+# Standard library modules used:
+# - csv
+# - json
+# - logging
+# - os
+# - sys
+# - datetime
+# - pathlib
+# - shutil

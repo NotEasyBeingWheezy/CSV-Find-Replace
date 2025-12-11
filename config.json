@@ -1,0 +1,33 @@
+{
+  "description": "Configuration file for HP SKU CSV Processor",
+  "general_settings": {
+    "create_backup": true,
+    "backup_suffix": "_backup",
+    "max_rows_to_process": 100000,
+    "target_column": "R",
+    "target_column_index": 17
+  },
+  "file_paths": {
+    "input_file": "./example_input.csv",
+    "output_file": "./test.csv",
+    "note": "Leave empty to be prompted, or specify absolute paths"
+  },
+  "processing_rules": {
+    "target_field_name": "HP SKU",
+    "search_value": "",
+    "replace_value": "",
+    "note": "Searches for 'search_value' in the target field and replaces with 'replace_value'"
+  },
+  "logging": {
+    "enabled": true,
+    "log_file": "sku_processor.log",
+    "verbose": true
+  },
+  "field_definitions": {
+    "target_column": "The column letter (e.g., 'R') containing JSON data",
+    "target_column_index": "Zero-based index of the column (R = 17)",
+    "target_field_name": "The JSON field name to search in (e.g., 'HP SKU')",
+    "search_value": "The value to search for in the target field",
+    "replace_value": "The value to replace search_value with"
+  }
+}
